@@ -63,7 +63,7 @@ func CreateSurvey(c *gin.Context) {
 	// 检查问卷每个题目的序号没有重复且按照顺序递增
 	questionNumMap := make(map[int]bool)
 	for i, question := range data.QuestionConfig.QuestionList {
-		if data.SurveyType == 2 && (question.QuestionSetting.QuestionType != 2 && !question.QuestionSetting.Required) {
+		if data.SurveyType == 1 && (question.QuestionSetting.QuestionType == 1 && !question.QuestionSetting.Required) {
 			code.AbortWithException(c, code.SurveyError, errors.New("投票题目只能为多选必填题"))
 			return
 		}

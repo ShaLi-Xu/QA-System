@@ -715,13 +715,13 @@ func DeleteOauthRecord(sid int64) error {
 	return d.DeleteRecordSheets(ctx, sid)
 }
 
-// DeleteAnswerSheetByAnswerID 根据问卷ID删除问卷
+// DeleteAnswerSheetByAnswerID 根据答卷ID删除答卷
 func DeleteAnswerSheetByAnswerID(answerID primitive.ObjectID) error {
 	err := d.DeleteAnswerSheetByAnswerID(ctx, answerID)
 	return err
 }
 
-// GetAnswerSheetByAnswerID 根据答卷ID删除答卷
+// GetAnswerSheetByAnswerID 根据答卷ID获取答卷
 func GetAnswerSheetByAnswerID(answerID primitive.ObjectID) error {
 	err := d.GetAnswerSheetByAnswerID(ctx, answerID)
 	return err

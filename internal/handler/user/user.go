@@ -46,14 +46,17 @@ func SubmitSurvey(c *gin.Context) {
 		return
 	}
 	var userInfo oauth.UserInfo
+	var stuId string
 	if survey.Verify {
 		userInfo, err = utils.ParseJWT(data.Token)
 		if err != nil {
 			code.AbortWithException(c, code.ServerError, err)
 			return
 		}
+		stuId = userInfo.StudentID
+	} else {
+		stuId = ""
 	}
-	stuId := userInfo.StudentID
 	questions, err := service.GetQuestionsBySurveyID(survey.ID)
 	if err != nil {
 		code.AbortWithException(c, code.ServerError, err)
@@ -137,7 +140,7 @@ func SubmitSurvey(c *gin.Context) {
 	}
 
 	submitTime := time.Now().Format(time.DateTime)
-	err = service.SubmitSurvey(data.ID, data.QuestionsList, submitTime)
+	err = service.SubmitSurvey(data.ID, data.QuestionsList, submitTime, stuId)
 	if err != nil {
 		code.AbortWithException(c, code.ServerError, err)
 		return
@@ -189,7 +192,7 @@ func GetSurvey(c *gin.Context) {
 	}
 	// 判断填写时间是否在问卷有效期内
 	if !survey.Deadline.IsZero() && survey.Deadline.Before(time.Now()) {
-		code.AbortWithException(c, code.TimeBeyondError, errors.New("问卷填写时间已截至"))
+		code.AbortWithException(c, code.TimeBeyondError, errors.New("问卷填写时间已截止"))
 		return
 	}
 	// 判断问卷是否开放
@@ -627,4 +630,68 @@ func ensureMap(m map[int]map[int]int, key int) map[int]int {
 		m[key] = make(map[int]int)
 	}
 	return m[key]
+}
+
+type getAnswerRecordData struct {
+	SurveyID int64  `json:"survey_id" binding:"required"`
+	Token    string `json:"token" binding:"required"`
+}
+
+// GetAnswerRecord 用户获取问卷填写记录
+func GetAnswerRecord(c *gin.Context) {
+	var data getAnswerRecordData
+	err := c.ShouldBindJSON(&data)
+	if err != nil {
+		code.AbortWithException(c, code.ParamError, err)
+		return
+	}
+	survey, err := service.GetSurveyByID(data.SurveyID)
+	if err != nil {
+		code.AbortWithException(c, code.ServerError, err)
+		return
+	}
+	if !survey.Verify {
+		code.AbortWithException(c, code.SurveyTypeError, errors.New("问卷非需统一验证问卷"))
+		return
+	}
+	if survey.Type != 1 {
+		code.AbortWithException(c, code.SurveyTypeError, errors.New("问卷为调研问卷"))
+		return
+	}
+	// 获取用户信息
+	var userInfo oauth.UserInfo
+	userInfo, err = utils.ParseJWT(data.Token)
+	if err != nil {
+		code.AbortWithException(c, code.ServerError, err)
+		return
+	}
+
+	// 获取该问卷所有填写记录
+	answerSheets, err := service.GetSurveyAnswersBySurveyID(data.SurveyID)
+	if err != nil {
+		code.AbortWithException(c, code.ServerError, err)
+		return
+	}
+
+	// 获取用户的填写记录
+	userAnswerSheets := service.GetUserAnswerSheetsByStudentID(answerSheets, userInfo.StudentID)
+
+	// 获取问题信息
+	questions, err := service.GetQuestionsBySurveyID(data.SurveyID)
+	if err != nil {
+		code.AbortWithException(c, code.ServerError, err)
+		return
+	}
+
+	response, err := service.CreateRecordResponse(userAnswerSheets, questions)
+	if err != nil {
+		code.AbortWithException(c, code.ServerError, err)
+		return
+	}
+
+	if len(userAnswerSheets) == 0 {
+		utils.JsonSuccessResponse(c, gin.H{"record": response})
+	} else {
+		utils.JsonSuccessResponse(c, gin.H{"statistics": response})
+	}
 }

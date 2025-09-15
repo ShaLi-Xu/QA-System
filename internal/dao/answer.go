@@ -23,11 +23,12 @@ type Answer struct {
 
 // AnswerSheet mongodb答卷表模型
 type AnswerSheet struct {
-	SurveyID int64              `json:"survey_id" bson:"surveyid"` // 问卷ID
-	AnswerID primitive.ObjectID `json:"answer_id" bson:"_id"`      // 答卷ID
-	Time     string             `json:"time" bson:"time"`          // 答卷时间
-	Unique   bool               `json:"unique" bson:"unique"`      // 是否唯一
-	Answers  []Answer           `json:"answers" bson:"answers"`    // 答案列表
+	StudentID string             `json:"student_id" bson:"studentid"` // 学生ID
+	SurveyID  int64              `json:"survey_id" bson:"surveyid"`   // 问卷ID
+	AnswerID  primitive.ObjectID `json:"answer_id" bson:"_id"`        // 答卷ID
+	Time      string             `json:"time" bson:"time"`            // 答卷时间
+	Unique    bool               `json:"unique" bson:"unique"`        // 是否唯一
+	Answers   []Answer           `json:"answers" bson:"answers"`      // 答案列表
 }
 
 // QuestionAnswers 问题答案模型
@@ -100,10 +101,11 @@ func (d *Dao) SaveAnswerSheet(ctx context.Context, answerSheet AnswerSheet, qids
 
 	// 新增一条记录
 	newAnswerSheet := AnswerSheet{
-		SurveyID: answerSheet.SurveyID,
-		Time:     answerSheet.Time,
-		Unique:   true,
-		Answers:  answerSheet.Answers,
+		StudentID: answerSheet.StudentID,
+		SurveyID:  answerSheet.SurveyID,
+		Time:      answerSheet.Time,
+		Unique:    true,
+		Answers:   answerSheet.Answers,
 	}
 
 	_, err = d.mongo.Collection(database.QA).InsertOne(ctx, newAnswerSheet)
