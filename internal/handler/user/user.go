@@ -263,6 +263,7 @@ func GetSurvey(c *gin.Context) {
 		"sum_limit":      survey.SumLimit,
 		"verify":         survey.Verify,
 		"undergrad_only": survey.UndergradOnly,
+		"need_notify":    survey.NeedNotify,
 	}
 	response := map[string]any{
 		"id":          survey.ID,
@@ -689,9 +690,7 @@ func GetAnswerRecord(c *gin.Context) {
 		return
 	}
 
-	if len(userAnswerSheets) == 0 {
-		utils.JsonSuccessResponse(c, gin.H{"record": response})
-	} else {
-		utils.JsonSuccessResponse(c, gin.H{"statistics": response})
-	}
+	utils.JsonSuccessResponse(c, gin.H{
+		"statistics": response,
+	})
 }
