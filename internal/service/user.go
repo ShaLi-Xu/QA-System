@@ -162,7 +162,6 @@ type getOptionCount struct {
 	SerialNum int    `json:"serial_num"` // 选项序号
 	Content   string `json:"content"`    // 选项内容
 	Count     int    `json:"count"`      // 选项数量
-	Rank      int    `json:"rank"`       // 选项排名
 }
 
 // GetAnswerRecordResponse 答卷记录的返回模型
@@ -190,7 +189,6 @@ func CreateRecordResponse(userAnswerSheets []dao.AnswerSheet,
 					SerialNum: option.SerialNum,
 					Content:   option.Content,
 					Count:     0,
-					Rank:      1,
 				})
 			}
 
@@ -200,7 +198,6 @@ func CreateRecordResponse(userAnswerSheets []dao.AnswerSheet,
 					SerialNum: 0,
 					Content:   "其他",
 					Count:     0,
-					Rank:      1,
 				})
 			}
 
@@ -300,17 +297,6 @@ func CreateRecordResponse(userAnswerSheets []dao.AnswerSheet,
 				Content:   op.Content,
 				Count:     count,
 			})
-		}
-
-		// 补充 rank
-		rankMap := make(map[int]int) // 用于记录选项的排名
-		for i := 0; i < len(qOptions); i++ {
-			rankMap[qOptions[i].SerialNum] = i + 1
-		}
-
-		// 将排名写回 qOptions
-		for i := range qOptions {
-			qOptions[i].Rank = rankMap[qOptions[i].SerialNum]
 		}
 
 		response = append(response, GetAnswerRecordResponse{
