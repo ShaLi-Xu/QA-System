@@ -192,6 +192,76 @@ func (d *Dao) GetAnswerSheetBySurveyID(
 	return answerSheets, &total, nil
 }
 
+// GetAnswerSheetBySurveyIDAndStudentID 根据问卷ID和学生ID分页获取答卷
+func (d *Dao) GetAnswerSheetBySurveyIDAndStudentID(
+	ctx context.Context, surveyID int64, studentID string, pageNum int, pageSize int, text string, unique bool) (
+	[]AnswerSheet, *int64, error) {
+	answerSheets := make([]AnswerSheet, 0)
+	filter := bson.M{
+		"surveyid":  surveyID,
+		"studentid": studentID,
+	}
+
+	// 如果 text 不为空，添加 text 的查询条件
+	if text != "" {
+		filter["answers.content"] = bson.M{"$regex": text, "$options": "i"} // i 表示不区分大小写
+	}
+
+	// 如果 unique 为 true，添加 unique 的查询条件
+	if unique {
+		filter["unique"] = true
+	}
+
+	// 设置总记录数查询过滤条件和选项
+	countFilter := filter
+	countOpts := options.Count()
+
+	// 执行总记录数查询
+	total, err := d.mongo.Collection(database.QA).CountDocuments(ctx, countFilter, countOpts)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// 查询分页超过总页数
+	if pageSize != 0 && int64(pageNum) > total/int64(pageSize)+1 {
+		return nil, nil, errors.New("页数超出范围")
+	}
+
+	// 设置分页查询选项
+	opts := options.Find()
+	if pageNum != 0 && pageSize != 0 {
+		opts.SetSkip(int64((pageNum - 1) * pageSize)) // 计算要跳过的文档数
+		opts.SetLimit(int64(pageSize))                // 设置返回的文档数
+	}
+
+	// 执行分页查询
+	cur, err := d.mongo.Collection(database.QA).Find(ctx, filter, opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func(cur *mongo.Cursor, ctx context.Context) {
+		err := cur.Close(ctx)
+		if err != nil {
+			zap.L().Error("Failed to close cursor", zap.Error(err))
+			return
+		}
+	}(cur, ctx)
+
+	// 迭代查询结果
+	for cur.Next(ctx) {
+		var answerSheet AnswerSheet
+		if err := cur.Decode(&answerSheet); err != nil {
+			return nil, nil, err
+		}
+		answerSheets = append(answerSheets, answerSheet)
+	}
+	if err := cur.Err(); err != nil {
+		return nil, nil, err
+	}
+	// 返回分页数据和总记录数
+	return answerSheets, &total, nil
+}
+
 // DeleteAnswerSheetBySurveyID 根据问卷ID删除答卷
 func (d *Dao) DeleteAnswerSheetBySurveyID(ctx context.Context, surveyID int64) error {
 	filter := bson.M{"surveyid": surveyID}

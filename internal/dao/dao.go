@@ -34,6 +34,9 @@ type Daos interface {
 	GetAnswerSheetBySurveyID(
 		ctx context.Context, surveyID int64, pageNum int, pageSize int, text string, unique bool) (
 		[]AnswerSheet, *int64, error)
+	GetAnswerSheetBySurveyIDAndStudentID(
+		ctx context.Context, surveyID int64, studentID string, pageNum int, pageSize int, text string, unique bool) (
+		[]AnswerSheet, *int64, error)
 	DeleteAnswerSheetBySurveyID(ctx context.Context, surveyID int64) error
 	DeleteAnswerSheetByAnswerID(ctx context.Context, answerID primitive.ObjectID) error
 	GetAnswerSheetByAnswerID(ctx context.Context, answerID primitive.ObjectID) error

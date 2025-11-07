@@ -309,13 +309,8 @@ func CreateRecordResponse(userAnswerSheets []dao.AnswerSheet,
 	return response, nil
 }
 
-// GetUserAnswerSheetsByStudentID 根据学生ID获取学生答卷
-func GetUserAnswerSheetsByStudentID(answerSheets []dao.AnswerSheet, stuID string) []dao.AnswerSheet {
-	var userAnswerSheets []dao.AnswerSheet
-	for _, answer := range answerSheets {
-		if answer.StudentID != "" && answer.StudentID == stuID {
-			userAnswerSheets = append(userAnswerSheets, answer)
-		}
-	}
-	return userAnswerSheets
+// GetSurveyAnswersBySurveyIDAndStudentID 根据问卷编号和学生学号获取问卷答案
+func GetSurveyAnswersBySurveyIDAndStudentID(surveyid int64, studentid string) ([]dao.AnswerSheet, error) {
+	answerSheets, _, err := d.GetAnswerSheetBySurveyIDAndStudentID(ctx, surveyid, studentid, 0, 0, "", true)
+	return answerSheets, err
 }

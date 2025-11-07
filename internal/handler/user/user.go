@@ -667,15 +667,12 @@ func GetAnswerRecord(c *gin.Context) {
 		return
 	}
 
-	// 获取该问卷所有填写记录
-	answerSheets, err := service.GetSurveyAnswersBySurveyID(data.SurveyID)
+	// 获取该用户对于该问卷的所有填写记录
+	userAnswerSheets, err := service.GetSurveyAnswersBySurveyIDAndStudentID(data.SurveyID, userInfo.StudentID)
 	if err != nil {
 		code.AbortWithException(c, code.ServerError, err)
 		return
 	}
-
-	// 获取用户的填写记录
-	userAnswerSheets := service.GetUserAnswerSheetsByStudentID(answerSheets, userInfo.StudentID)
 
 	// 获取问题信息
 	questions, err := service.GetQuestionsBySurveyID(data.SurveyID)
