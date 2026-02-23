@@ -145,15 +145,10 @@ func UpdateSurvey(id int64, question_list []dao.QuestionList, surveyType,
 	}
 	// 删除原有问题和选项
 	for _, oldQuestion := range oldQuestions {
-		oldOptions, err := d.GetOptionsByQuestionID(ctx, oldQuestion.ID)
+		// DeleteOption 按 question_id 删除，不能传 option.id
+		err = d.DeleteOption(ctx, oldQuestion.ID)
 		if err != nil {
 			return err
-		}
-		for _, oldOption := range oldOptions {
-			err = d.DeleteOption(ctx, oldOption.ID)
-			if err != nil {
-				return err
-			}
 		}
 		err = d.DeleteQuestion(ctx, oldQuestion.ID)
 		if err != nil {
