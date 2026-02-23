@@ -71,42 +71,22 @@ func (d *Dao) SaveAnswerSheet(ctx context.Context, answerSheet AnswerSheet, qids
 	}
 
 	filter := bson.M{
-		"unique": true,
-		"$or":    matchConditions,
+		"surveyid": answerSheet.SurveyID,
+		"unique":   true,
+		"$or":      matchConditions,
 	}
 
-	var result AnswerSheet
-	err := d.mongo.Collection(database.QA).FindOne(ctx, filter).Decode(&result)
-	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			// 没有找到符合条件的记录，直接插入新记录
-			_, err := d.mongo.Collection(database.QA).InsertOne(ctx, answerSheet)
-			if err != nil {
-				return err
-			}
-			return nil
-		}
-		return err
-	}
-
-	// 更新找到的记录，将unique设为false
+	// 将同问卷中命中唯一题条件的旧答卷标记为非唯一。
 	update := bson.M{
 		"$set": bson.M{"unique": false},
 	}
-	_, err = d.mongo.Collection(database.QA).UpdateOne(ctx, filter, update)
+	_, err := d.mongo.Collection(database.QA).UpdateMany(ctx, filter, update)
 	if err != nil {
 		return err
 	}
 
-	// 新增一条记录
-	newAnswerSheet := AnswerSheet{
-		SurveyID: answerSheet.SurveyID,
-		Time:     answerSheet.Time,
-		Unique:   true,
-		Answers:  answerSheet.Answers,
-	}
-
-	_, err = d.mongo.Collection(database.QA).InsertOne(ctx, newAnswerSheet)
+	// 新增一条记录（保留调用方生成的 AnswerID）
+	_, err = d.mongo.Collection(database.QA).InsertOne(ctx, answerSheet)
 	if err != nil {
 		return err
 	}
