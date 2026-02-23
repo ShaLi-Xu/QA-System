@@ -830,6 +830,7 @@ func DeleteAnswerSheet(c *gin.Context) {
 	objectID, err := primitive.ObjectIDFromHex(data.AnswerID)
 	if err != nil {
 		code.AbortWithException(c, code.ServerError, err)
+		return
 	}
 	// 获取问卷
 	err = service.GetAnswerSheetByAnswerID(objectID)
