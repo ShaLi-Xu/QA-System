@@ -35,7 +35,10 @@ func (d *Dao) GetOptionsByQuestionID(ctx context.Context, questionID int) ([]mod
 			return options, nil
 		}
 	}
-	err = d.orm.WithContext(ctx).Model(model.Option{}).Where("question_id = ?", questionID).Find(&options).Error
+	err = d.orm.WithContext(ctx).Model(model.Option{}).
+		Where("question_id = ?", questionID).
+		Order("serial_num ASC").
+		Find(&options).Error
 	if err != nil {
 		return nil, err
 	}
