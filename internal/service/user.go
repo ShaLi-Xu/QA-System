@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/zjutjh/WeJH-SDK/oauth"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.uber.org/zap"
 	_ "golang.org/x/image/bmp" // 注册解码器
 	_ "golang.org/x/image/tiff"
 	_ "golang.org/x/image/webp"
@@ -68,12 +69,22 @@ func SubmitSurvey(sid int64, data []dao.QuestionsList, t string) error {
 	if err != nil {
 		return err
 	}
-	err = d.IncreaseSurveyNum(ctx, sid)
-	if err != nil {
+		err = d.IncreaseSurveyNum(ctx, sid)
+		if err != nil {
+			if rollbackErr := d.DeleteAnswerSheetByAnswerID(ctx, answerSheet.AnswerID); rollbackErr != nil {
+				zap.L().Error("问卷计数更新失败后回滚答卷失败",
+					zap.Int64("survey_id", sid),
+					zap.String("answer_id", answerSheet.AnswerID.Hex()),
+					zap.Error(rollbackErr),
+				)
+			}
 		return err
 	}
-	err = FromSurveyIDToMsg(sid)
-	return err
+	// 通知失败不影响主提交流程，避免客户端因重试造成重复提交。
+	if err := FromSurveyIDToMsg(sid); err != nil {
+		zap.L().Warn("问卷提交后发送通知失败", zap.Int64("survey_id", sid), zap.Error(err))
+	}
+	return nil
 }
 
 // CreateOauthRecord 创建一条统一验证记录

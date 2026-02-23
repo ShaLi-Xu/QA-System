@@ -157,24 +157,33 @@ func SubmitSurvey(c *gin.Context) {
 	}
 
 	if survey.Verify {
-		if survey.DailyLimit > 0 {
-			err := service.UpdateVoteLimit(c, stuId, survey.ID, flagDay, "dailyLimit")
-			if err != nil {
-				code.AbortWithException(c, code.ServerError, err)
-				return
-			}
+			if survey.DailyLimit > 0 {
+				err := service.UpdateVoteLimit(c, stuId, survey.ID, flagDay, "dailyLimit")
+				if err != nil {
+					zap.L().Warn("问卷提交后更新单日投票限制失败",
+						zap.Int64("survey_id", survey.ID),
+						zap.String("student_id", stuId),
+						zap.Error(err),
+					)
+				}
 		}
-		if survey.SumLimit > 0 {
-			err := service.UpdateVoteLimit(c, stuId, survey.ID, flagSum, "sumLimit")
-			if err != nil {
-				code.AbortWithException(c, code.ServerError, err)
-				return
+			if survey.SumLimit > 0 {
+				err := service.UpdateVoteLimit(c, stuId, survey.ID, flagSum, "sumLimit")
+				if err != nil {
+					zap.L().Warn("问卷提交后更新总投票限制失败",
+						zap.Int64("survey_id", survey.ID),
+						zap.String("student_id", stuId),
+						zap.Error(err),
+					)
+				}
 			}
-		}
-		// 记录授权
-		if err = service.CreateOauthRecord(userInfo, time.Now(), data.ID); err != nil {
-			code.AbortWithException(c, code.ServerError, err)
-			return
+			// 记录授权
+			if err = service.CreateOauthRecord(userInfo, time.Now(), data.ID); err != nil {
+				zap.L().Warn("问卷提交后记录统一验证信息失败",
+					zap.Int64("survey_id", survey.ID),
+					zap.String("student_id", stuId),
+					zap.Error(err),
+				)
 		}
 	}
 	utils.JsonSuccessResponse(c, gin.H{
