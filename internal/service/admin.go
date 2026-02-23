@@ -278,12 +278,14 @@ func GetSurveyAnswers(id int64, num int, size int, text string, unique bool) (da
 		return dao.AnswersResonse{}, nil, err
 	}
 	// 初始化data
+	questionIndex := make(map[int]int, len(questions))
 	for _, question := range questions {
 		var q dao.QuestionAnswers
 		q.Title = question.Subject
 		q.QuestionType = question.QuestionType
 		q.Answers = make([]string, 0)
 		data = append(data, q)
+		questionIndex[question.ID] = len(data) - 1
 	}
 	// 获取答卷
 	answerSheets, total, err = d.GetAnswerSheetBySurveyID(ctx, id, num, size, text, unique)
@@ -295,14 +297,8 @@ func GetSurveyAnswers(id int64, num int, size int, text string, unique bool) (da
 		times = append(times, answerSheet.Time)
 		aids = append(aids, answerSheet.AnswerID)
 		for _, answer := range answerSheet.Answers {
-			question, err := d.GetQuestionByID(ctx, answer.QuestionID)
-			if err != nil {
-				return dao.AnswersResonse{}, nil, err
-			}
-			for i, q := range data {
-				if q.Title == question.Subject {
-					data[i].Answers = append(data[i].Answers, answer.Content)
-				}
+			if i, ok := questionIndex[answer.QuestionID]; ok {
+				data[i].Answers = append(data[i].Answers, answer.Content)
 			}
 		}
 	}
@@ -412,11 +408,13 @@ func GetAllSurveyAnswers(id int64) (dao.AnswersResonse, error) {
 	if err != nil {
 		return dao.AnswersResonse{}, err
 	}
+	questionIndex := make(map[int]int, len(questions))
 	for _, question := range questions {
 		var q dao.QuestionAnswers
 		q.Title = question.Subject
 		q.QuestionType = question.QuestionType
 		data = append(data, q)
+		questionIndex[question.ID] = len(data) - 1
 	}
 	answerSheets, _, err = d.GetAnswerSheetBySurveyID(ctx, id, 0, 0, "", true)
 	if err != nil {
@@ -425,14 +423,8 @@ func GetAllSurveyAnswers(id int64) (dao.AnswersResonse, error) {
 	for _, answerSheet := range answerSheets {
 		times = append(times, answerSheet.Time)
 		for _, answer := range answerSheet.Answers {
-			question, err := d.GetQuestionByID(ctx, answer.QuestionID)
-			if err != nil {
-				return dao.AnswersResonse{}, err
-			}
-			for i, q := range data {
-				if q.Title == question.Subject {
-					data[i].Answers = append(data[i].Answers, answer.Content)
-				}
+			if i, ok := questionIndex[answer.QuestionID]; ok {
+				data[i].Answers = append(data[i].Answers, answer.Content)
 			}
 		}
 	}
