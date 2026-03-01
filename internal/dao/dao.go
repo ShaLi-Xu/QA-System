@@ -2,6 +2,7 @@ package dao
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"QA-System/internal/model"
@@ -26,6 +27,39 @@ func New(orm *gorm.DB, mongodb *mongo.Database) Daos {
 	// 初始化用户邮箱缓存
 	dao.InitializeCache()
 	return dao
+}
+
+// RunInTx 在同一个 MySQL 事务中执行一组 DAO 操作。
+func RunInTx(store Daos, ctx context.Context, fn func(Daos) error) (err error) {
+	base, ok := store.(*Dao)
+	if !ok {
+		return fmt.Errorf("unsupported dao implementation: %T", store)
+	}
+
+	tx := base.orm.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+
+	txDao := &Dao{
+		orm:   tx,
+		mongo: base.mongo,
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			_ = tx.Rollback()
+			panic(r)
+		}
+		if err != nil {
+			_ = tx.Rollback()
+			return
+		}
+		err = tx.Commit().Error
+	}()
+
+	err = fn(txDao)
+	return err
 }
 
 // Daos 数据访问对象接口

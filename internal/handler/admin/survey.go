@@ -63,7 +63,7 @@ func CreateSurvey(c *gin.Context) {
 	// 检查问卷每个题目的序号没有重复且按照顺序递增
 	questionNumMap := make(map[int]bool)
 	for i, question := range data.QuestionConfig.QuestionList {
-		if data.SurveyType == 2 && (question.QuestionSetting.QuestionType != 2 && !question.QuestionSetting.Required) {
+		if data.SurveyType == 1 && (question.QuestionSetting.QuestionType != 2 || !question.QuestionSetting.Required) {
 			code.AbortWithException(c, code.SurveyError, errors.New("投票题目只能为多选必填题"))
 			return
 		}
@@ -416,8 +416,8 @@ type getSurveyAnswersData struct {
 	ID       int64  `form:"id" binding:"required"`
 	Text     string `form:"text"`
 	Unique   bool   `form:"unique"`
-	PageNum  int    `form:"page_num" binding:"required"`
-	PageSize int    `form:"page_size" binding:"required"`
+	PageNum  int    `form:"page_num" binding:"required,gt=0"`
+	PageSize int    `form:"page_size" binding:"required,gt=0"`
 }
 
 // GetSurveyAnswers 获取问卷收集数据
@@ -469,8 +469,8 @@ func GetSurveyAnswers(c *gin.Context) {
 }
 
 type getAllSurveyData struct {
-	PageNum  int    `form:"page_num" binding:"required"`
-	PageSize int    `form:"page_size" binding:"required"`
+	PageNum  int    `form:"page_num" binding:"required,gt=0"`
+	PageSize int    `form:"page_size" binding:"required,gt=0"`
 	Title    string `form:"title"`
 }
 
@@ -672,8 +672,8 @@ func DownloadFile(c *gin.Context) {
 
 type getSurveyStatisticsData struct {
 	ID       int64 `form:"id" binding:"required"`
-	PageNum  int   `form:"page_num" binding:"required"`
-	PageSize int   `form:"page_size" binding:"required"`
+	PageNum  int   `form:"page_num" binding:"required,gt=0"`
+	PageSize int   `form:"page_size" binding:"required,gt=0"`
 }
 
 // GetSurveyStatistics 获取统计问卷选择题数据
@@ -830,6 +830,7 @@ func DeleteAnswerSheet(c *gin.Context) {
 	objectID, err := primitive.ObjectIDFromHex(data.AnswerID)
 	if err != nil {
 		code.AbortWithException(c, code.ServerError, err)
+		return
 	}
 	// 获取问卷
 	err = service.GetAnswerSheetByAnswerID(objectID)

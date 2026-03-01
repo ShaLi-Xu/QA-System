@@ -72,7 +72,10 @@ func (d *Dao) GetQuestionsBySurveyID(ctx context.Context, surveyID int64) ([]mod
 			return questions, nil
 		}
 	}
-	err = d.orm.WithContext(ctx).Model(model.Question{}).Where("survey_id = ?", surveyID).Find(&questions).Error
+	err = d.orm.WithContext(ctx).Model(model.Question{}).
+		Where("survey_id = ?", surveyID).
+		Order("serial_num ASC").
+		Find(&questions).Error
 	if err != nil {
 		return nil, err
 	}

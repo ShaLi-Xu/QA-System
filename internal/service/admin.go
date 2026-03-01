@@ -112,12 +112,15 @@ func CreateSurvey(id int, question_list []dao.QuestionList, status int, surveyTy
 	survey.Title = title
 	survey.Desc = desc
 	survey.NeedNotify = neednot
-	survey, err := d.CreateSurvey(ctx, survey)
-	if err != nil {
+
+	return dao.RunInTx(d, ctx, func(store dao.Daos) error {
+		createdSurvey, err := store.CreateSurvey(ctx, survey)
+		if err != nil {
+			return err
+		}
+		_, err = createQuestionsAndOptionsWithStore(store, question_list, createdSurvey.ID)
 		return err
-	}
-	_, err = createQuestionsAndOptions(question_list, survey.ID)
-	return err
+	})
 }
 
 // UpdateSurveyStatus 更新问卷状态
@@ -143,43 +146,42 @@ func UpdateSurvey(id int64, question_list []dao.QuestionList, surveyType,
 	if err != nil {
 		return err
 	}
-	// 删除原有问题和选项
-	for _, oldQuestion := range oldQuestions {
-		oldOptions, err := d.GetOptionsByQuestionID(ctx, oldQuestion.ID)
-		if err != nil {
-			return err
-		}
-		for _, oldOption := range oldOptions {
-			err = d.DeleteOption(ctx, oldOption.ID)
-			if err != nil {
+	// 在事务内删除原有问题/选项并重建，避免中途失败导致 MySQL 数据半更新。
+	err = dao.RunInTx(d, ctx, func(store dao.Daos) error {
+		for _, oldQuestion := range oldQuestions {
+			// DeleteOption 按 question_id 删除，不能传 option.id
+			if err := store.DeleteOption(ctx, oldQuestion.ID); err != nil {
+				return err
+			}
+			if err := store.DeleteQuestion(ctx, oldQuestion.ID); err != nil {
 				return err
 			}
 		}
-		err = d.DeleteQuestion(ctx, oldQuestion.ID)
+
+		if err := store.UpdateSurvey(ctx, id, surveyType, limit, sumLimit, verify, undergradOnly, desc, title, ddl,
+			startTime, needNotify); err != nil {
+			return err
+		}
+
+		imgs, err := createQuestionsAndOptionsWithStore(store, question_list, id)
 		if err != nil {
 			return err
 		}
-		err = dao.DeleteAllQuestionCache(ctx)
-		if err != nil {
-			return err
-		}
-		err = dao.DeleteAllOptionCache(ctx)
-		if err != nil {
-			return err
-		}
-	}
-	// 修改问卷信息
-	err = d.UpdateSurvey(ctx, id, surveyType, limit, sumLimit, verify, undergradOnly, desc, title, ddl, startTime,
-		needNotify)
+		newImgs = append(newImgs, imgs...)
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	// 重新添加问题和选项
-	imgs, err := createQuestionsAndOptions(question_list, id)
+	// 结构更新后统一清缓存，避免循环内重复全量扫描。
+	err = dao.DeleteAllQuestionCache(ctx)
 	if err != nil {
 		return err
 	}
-	newImgs = append(newImgs, imgs...)
+	err = dao.DeleteAllOptionCache(ctx)
+	if err != nil {
+		return err
+	}
 	// 删除无用图片
 	for _, oldImg := range oldImgs {
 		if !contains(newImgs, oldImg) {
@@ -278,12 +280,14 @@ func GetSurveyAnswers(id int64, num int, size int, text string, unique bool) (da
 		return dao.AnswersResonse{}, nil, err
 	}
 	// 初始化data
+	questionIndex := make(map[int]int, len(questions))
 	for _, question := range questions {
 		var q dao.QuestionAnswers
 		q.Title = question.Subject
 		q.QuestionType = question.QuestionType
 		q.Answers = make([]string, 0)
 		data = append(data, q)
+		questionIndex[question.ID] = len(data) - 1
 	}
 	// 获取答卷
 	answerSheets, total, err = d.GetAnswerSheetBySurveyID(ctx, id, num, size, text, unique)
@@ -295,14 +299,8 @@ func GetSurveyAnswers(id int64, num int, size int, text string, unique bool) (da
 		times = append(times, answerSheet.Time)
 		aids = append(aids, answerSheet.AnswerID)
 		for _, answer := range answerSheet.Answers {
-			question, err := d.GetQuestionByID(ctx, answer.QuestionID)
-			if err != nil {
-				return dao.AnswersResonse{}, nil, err
-			}
-			for i, q := range data {
-				if q.Title == question.Subject {
-					data[i].Answers = append(data[i].Answers, answer.Content)
-				}
+			if i, ok := questionIndex[answer.QuestionID]; ok {
+				data[i].Answers = append(data[i].Answers, answer.Content)
 			}
 		}
 	}
@@ -412,11 +410,13 @@ func GetAllSurveyAnswers(id int64) (dao.AnswersResonse, error) {
 	if err != nil {
 		return dao.AnswersResonse{}, err
 	}
+	questionIndex := make(map[int]int, len(questions))
 	for _, question := range questions {
 		var q dao.QuestionAnswers
 		q.Title = question.Subject
 		q.QuestionType = question.QuestionType
 		data = append(data, q)
+		questionIndex[question.ID] = len(data) - 1
 	}
 	answerSheets, _, err = d.GetAnswerSheetBySurveyID(ctx, id, 0, 0, "", true)
 	if err != nil {
@@ -425,14 +425,8 @@ func GetAllSurveyAnswers(id int64) (dao.AnswersResonse, error) {
 	for _, answerSheet := range answerSheets {
 		times = append(times, answerSheet.Time)
 		for _, answer := range answerSheet.Answers {
-			question, err := d.GetQuestionByID(ctx, answer.QuestionID)
-			if err != nil {
-				return dao.AnswersResonse{}, err
-			}
-			for i, q := range data {
-				if q.Title == question.Subject {
-					data[i].Answers = append(data[i].Answers, answer.Content)
-				}
+			if i, ok := questionIndex[answer.QuestionID]; ok {
+				data[i].Answers = append(data[i].Answers, answer.Content)
 			}
 		}
 	}
@@ -517,28 +511,32 @@ func getDelFiles(answerSheets []dao.AnswerSheet) ([]string, error) {
 	return files, nil
 }
 
-func createQuestionsAndOptions(question_list []dao.QuestionList, sid int64) ([]string, error) {
+func createQuestionsAndOptions(questionList []dao.QuestionList, sid int64) ([]string, error) {
+	return createQuestionsAndOptionsWithStore(d, questionList, sid)
+}
+
+func createQuestionsAndOptionsWithStore(store dao.Daos, questionList []dao.QuestionList, sid int64) ([]string, error) {
 	imgs := make([]string, 0)
-	for _, question_list := range question_list {
+	for _, questionItem := range questionList {
 		var q model.Question
-		q.SerialNum = question_list.SerialNum
+		q.SerialNum = questionItem.SerialNum
 		q.SurveyID = sid
-		q.Subject = question_list.Subject
-		q.Description = question_list.Description
-		q.Img = question_list.Img
-		q.Required = question_list.QuestionSetting.Required
-		q.Unique = question_list.QuestionSetting.Unique
-		q.OtherOption = question_list.QuestionSetting.OtherOption
-		q.QuestionType = question_list.QuestionSetting.QuestionType
-		q.MaximumOption = question_list.QuestionSetting.MaximumOption
-		q.MinimumOption = question_list.QuestionSetting.MinimumOption
-		q.Reg = question_list.QuestionSetting.Reg
-		imgs = append(imgs, question_list.Img)
-		q, err := d.CreateQuestion(ctx, q)
+		q.Subject = questionItem.Subject
+		q.Description = questionItem.Description
+		q.Img = questionItem.Img
+		q.Required = questionItem.QuestionSetting.Required
+		q.Unique = questionItem.QuestionSetting.Unique
+		q.OtherOption = questionItem.QuestionSetting.OtherOption
+		q.QuestionType = questionItem.QuestionSetting.QuestionType
+		q.MaximumOption = questionItem.QuestionSetting.MaximumOption
+		q.MinimumOption = questionItem.QuestionSetting.MinimumOption
+		q.Reg = questionItem.QuestionSetting.Reg
+		imgs = append(imgs, questionItem.Img)
+		q, err := store.CreateQuestion(ctx, q)
 		if err != nil {
 			return nil, err
 		}
-		for _, option := range question_list.Options {
+		for _, option := range questionItem.Options {
 			var o model.Option
 			o.Content = option.Content
 			o.QuestionID = q.ID
@@ -546,7 +544,7 @@ func createQuestionsAndOptions(question_list []dao.QuestionList, sid int64) ([]s
 			o.Img = option.Img
 			o.Description = option.Description
 			imgs = append(imgs, option.Img)
-			err := d.CreateOption(ctx, o)
+			err := store.CreateOption(ctx, o)
 			if err != nil {
 				return nil, err
 			}

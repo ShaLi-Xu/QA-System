@@ -65,6 +65,11 @@ func SubmitSurvey(c *gin.Context) {
 		code.AbortWithException(c, code.SurveyError, errors.New("问卷问题和上传问题数量不一致"))
 		return
 	}
+	questionMap := make(map[int]model.Question, len(questions))
+	for _, question := range questions {
+		questionMap[question.ID] = question
+	}
+	seenQuestions := make(map[int]struct{}, len(data.QuestionsList))
 	// 判断填写时间是否在问卷有效期内
 	if !survey.Deadline.IsZero() && survey.Deadline.Before(time.Now()) {
 		code.AbortWithException(c, code.TimeBeyondError, errors.New("填写时间已过"))
@@ -81,16 +86,18 @@ func SubmitSurvey(c *gin.Context) {
 	}
 	// 逐个判断问题答案
 	for _, q := range data.QuestionsList {
-		question, err := service.GetQuestionByID(q.QuestionID)
-		if err != nil {
-			code.AbortWithException(c, code.ServerError, err)
-			return
-		}
-		if question.SurveyID != survey.ID {
+		question, ok := questionMap[q.QuestionID]
+		if !ok {
 			code.AbortWithException(c, code.ServerError,
-				errors.New("问题"+strconv.Itoa(question.SerialNum)+"不属于该问卷"))
+				errors.New("问题"+strconv.Itoa(q.QuestionID)+"不属于该问卷"))
 			return
 		}
+		if _, exists := seenQuestions[q.QuestionID]; exists {
+			code.AbortWithException(c, code.SurveyError,
+				errors.New("问卷问题重复提交"))
+			return
+		}
+		seenQuestions[q.QuestionID] = struct{}{}
 		// 判断必填字段是否为空
 		if question.Required && q.Answer == "" {
 			code.AbortWithException(c, code.ServerError,
@@ -109,6 +116,10 @@ func SubmitSurvey(c *gin.Context) {
 				return
 			}
 		}
+	}
+	if len(seenQuestions) != len(questionMap) {
+		code.AbortWithException(c, code.SurveyError, errors.New("问卷问题缺失或重复"))
+		return
 	}
 	flagSum, flagDay := false, false
 
@@ -149,21 +160,30 @@ func SubmitSurvey(c *gin.Context) {
 		if survey.DailyLimit > 0 {
 			err := service.UpdateVoteLimit(c, stuId, survey.ID, flagDay, "dailyLimit")
 			if err != nil {
-				code.AbortWithException(c, code.ServerError, err)
-				return
+				zap.L().Warn("问卷提交后更新单日投票限制失败",
+					zap.Int64("survey_id", survey.ID),
+					zap.String("student_id", stuId),
+					zap.Error(err),
+				)
 			}
 		}
 		if survey.SumLimit > 0 {
 			err := service.UpdateVoteLimit(c, stuId, survey.ID, flagSum, "sumLimit")
 			if err != nil {
-				code.AbortWithException(c, code.ServerError, err)
-				return
+				zap.L().Warn("问卷提交后更新总投票限制失败",
+					zap.Int64("survey_id", survey.ID),
+					zap.String("student_id", stuId),
+					zap.Error(err),
+				)
 			}
 		}
 		// 记录授权
 		if err = service.CreateOauthRecord(userInfo, time.Now(), data.ID); err != nil {
-			code.AbortWithException(c, code.ServerError, err)
-			return
+			zap.L().Warn("问卷提交后记录统一验证信息失败",
+				zap.Int64("survey_id", survey.ID),
+				zap.String("student_id", stuId),
+				zap.Error(err),
+			)
 		}
 	}
 	utils.JsonSuccessResponse(c, gin.H{
@@ -199,7 +219,7 @@ func GetSurvey(c *gin.Context) {
 		code.AbortWithException(c, code.SurveyNotOpen, errors.New("问卷未开放"))
 		return
 	}
-	if survey.StartTime.IsZero() && survey.StartTime.After(time.Now()) {
+	if !survey.StartTime.IsZero() && survey.StartTime.After(time.Now()) {
 		code.AbortWithException(c, code.SurveyNotOpen, errors.New("问卷未开放"))
 		return
 	}
