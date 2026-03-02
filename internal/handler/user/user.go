@@ -184,7 +184,9 @@ func GetSurvey(c *gin.Context) {
 	}
 	// 获取用户信息
 	user, err := service.GetUserSession(c)
-	if err != nil && !errors.Is(err, errors.New("")) {
+	// Treat an empty error message as "no session" (anonymous access), but
+	// still abort on any non-nil, non-empty error.
+	if err != nil && err.Error() != "" {
 		code.AbortWithException(c, code.ServerError, err)
 		return
 	}
