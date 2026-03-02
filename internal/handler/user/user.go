@@ -192,7 +192,8 @@ func SubmitSurvey(c *gin.Context) {
 }
 
 type getSurveyData struct {
-	ID int64 `form:"id" binding:"required"`
+	ID           int64 `form:"id" binding:"required"`
+	IsPreVisible bool  `form:"is_pre_visible"`
 }
 
 // GetSurvey 用户获取问卷
@@ -201,6 +202,14 @@ func GetSurvey(c *gin.Context) {
 	err := c.ShouldBindQuery(&data)
 	if err != nil {
 		code.AbortWithException(c, code.ParamError, err)
+		return
+	}
+	// 获取用户信息
+	user, err := service.GetUserSession(c)
+	// Treat an empty error message as "no session" (anonymous access), but
+	// still abort on any non-nil, non-empty error.
+	if err != nil && err.Error() != "" {
+		code.AbortWithException(c, code.ServerError, err)
 		return
 	}
 	// 获取问卷
@@ -215,7 +224,7 @@ func GetSurvey(c *gin.Context) {
 		return
 	}
 	// 判断问卷是否开放
-	if survey.Status != 2 {
+	if survey.Status != 2 && (user == nil || data.IsPreVisible == 0) {
 		code.AbortWithException(c, code.SurveyNotOpen, errors.New("问卷未开放"))
 		return
 	}
