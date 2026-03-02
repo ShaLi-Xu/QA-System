@@ -171,7 +171,7 @@ func SubmitSurvey(c *gin.Context) {
 
 type getSurveyData struct {
 	ID           int64 `form:"id" binding:"required"`
-	IsPreVisible int8  `form:"isPreVisible"`
+	IsPreVisible bool  `form:"is_pre_visible"`
 }
 
 // GetSurvey 用户获取问卷
