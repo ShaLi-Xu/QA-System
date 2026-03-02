@@ -681,13 +681,16 @@ func GetAnswerRecord(c *gin.Context) {
 		return
 	}
 
-	response, err := service.CreateRecordResponse(userAnswerSheets, questions)
+	records := service.CreateRecordDetailResponseWithQuestions(userAnswerSheets, questions)
+
+	statistics, err := service.CreateRecordResponse(userAnswerSheets, questions)
 	if err != nil {
 		code.AbortWithException(c, code.ServerError, err)
 		return
 	}
 
 	utils.JsonSuccessResponse(c, gin.H{
-		"statistics": response,
+		"records":    records,
+		"statistics": statistics,
 	})
 }
