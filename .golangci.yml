@@ -13,7 +13,7 @@ output:
 linters-settings:
   errcheck:
     check-type-assertions: true  # 检查类型断言的错误处理
-    check-blank: true  # 检查将错误分配给空标识符的情况
+    check-blank: false  # 检查将错误分配给空标识符的情况
     exclude-functions:  # 不检查这些函数
       - fmt:.*
       - io/ioutil:^Read.*

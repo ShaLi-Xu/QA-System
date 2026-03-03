@@ -72,29 +72,16 @@ func (d *Dao) SaveAnswerSheet(ctx context.Context, answerSheet AnswerSheet, qids
 	}
 
 	filter := bson.M{
-		"unique": true,
-		"$or":    matchConditions,
+		"surveyid": answerSheet.SurveyID,
+		"unique":   true,
+		"$or":      matchConditions,
 	}
 
-	var result AnswerSheet
-	err := d.mongo.Collection(database.QA).FindOne(ctx, filter).Decode(&result)
-	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			// 没有找到符合条件的记录，直接插入新记录
-			_, err := d.mongo.Collection(database.QA).InsertOne(ctx, answerSheet)
-			if err != nil {
-				return err
-			}
-			return nil
-		}
-		return err
-	}
-
-	// 更新找到的记录，将unique设为false
+	// 将同问卷中命中唯一题条件的旧答卷标记为非唯一。
 	update := bson.M{
 		"$set": bson.M{"unique": false},
 	}
-	_, err = d.mongo.Collection(database.QA).UpdateOne(ctx, filter, update)
+	_, err := d.mongo.Collection(database.QA).UpdateMany(ctx, filter, update)
 	if err != nil {
 		return err
 	}
@@ -152,9 +139,15 @@ func (d *Dao) GetAnswerSheetBySurveyID(
 		return nil, nil, err
 	}
 
-	// 查询分页超过总页数
-	if pageSize != 0 && int64(pageNum) > total/int64(pageSize)+1 {
-		return nil, nil, errors.New("页数超出范围")
+	// 查询分页超过总页数（pageNum/pageSize 为 0 时表示不分页）
+	if pageNum > 0 && pageSize > 0 {
+		totalPages := (total + int64(pageSize) - 1) / int64(pageSize)
+		if totalPages == 0 {
+			totalPages = 1
+		}
+		if int64(pageNum) > totalPages {
+			return nil, nil, errors.New("页数超出范围")
+		}
 	}
 
 	// 设置分页查询选项

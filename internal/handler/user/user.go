@@ -1,14 +1,17 @@
 package user
 
 import (
+	"QA-System/internal/pkg/log"
+	"QA-System/internal/pkg/oss"
 	"errors"
-	"image"
 	"mime/multipart"
-	"path/filepath"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zjutjh/WeJH-SDK/cube"
 
 	"QA-System/internal/dao"
 	"QA-System/internal/model"
@@ -18,7 +21,6 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/zjutjh/WeJH-SDK/oauth"
 	"github.com/zjutjh/WeJH-SDK/oauth/oauthException"
@@ -66,6 +68,11 @@ func SubmitSurvey(c *gin.Context) {
 		code.AbortWithException(c, code.SurveyError, errors.New("问卷问题和上传问题数量不一致"))
 		return
 	}
+	questionMap := make(map[int]model.Question, len(questions))
+	for _, question := range questions {
+		questionMap[question.ID] = question
+	}
+	seenQuestions := make(map[int]struct{}, len(data.QuestionsList))
 	// 判断填写时间是否在问卷有效期内
 	if !survey.Deadline.IsZero() && survey.Deadline.Before(time.Now()) {
 		code.AbortWithException(c, code.TimeBeyondError, errors.New("填写时间已过"))
@@ -82,16 +89,18 @@ func SubmitSurvey(c *gin.Context) {
 	}
 	// 逐个判断问题答案
 	for _, q := range data.QuestionsList {
-		question, err := service.GetQuestionByID(q.QuestionID)
-		if err != nil {
-			code.AbortWithException(c, code.ServerError, err)
-			return
-		}
-		if question.SurveyID != survey.ID {
+		question, ok := questionMap[q.QuestionID]
+		if !ok {
 			code.AbortWithException(c, code.ServerError,
-				errors.New("问题"+strconv.Itoa(question.SerialNum)+"不属于该问卷"))
+				errors.New("问题"+strconv.Itoa(q.QuestionID)+"不属于该问卷"))
 			return
 		}
+		if _, exists := seenQuestions[q.QuestionID]; exists {
+			code.AbortWithException(c, code.SurveyError,
+				errors.New("问卷问题重复提交"))
+			return
+		}
+		seenQuestions[q.QuestionID] = struct{}{}
 		// 判断必填字段是否为空
 		if question.Required && q.Answer == "" {
 			code.AbortWithException(c, code.ServerError,
@@ -110,6 +119,10 @@ func SubmitSurvey(c *gin.Context) {
 				return
 			}
 		}
+	}
+	if len(seenQuestions) != len(questionMap) {
+		code.AbortWithException(c, code.SurveyError, errors.New("问卷问题缺失或重复"))
+		return
 	}
 	flagSum, flagDay := false, false
 
@@ -150,21 +163,30 @@ func SubmitSurvey(c *gin.Context) {
 		if survey.DailyLimit > 0 {
 			err := service.UpdateVoteLimit(c, stuId, survey.ID, flagDay, "dailyLimit")
 			if err != nil {
-				code.AbortWithException(c, code.ServerError, err)
-				return
+				zap.L().Warn("问卷提交后更新单日投票限制失败",
+					zap.Int64("survey_id", survey.ID),
+					zap.String("student_id", stuId),
+					zap.Error(err),
+				)
 			}
 		}
 		if survey.SumLimit > 0 {
 			err := service.UpdateVoteLimit(c, stuId, survey.ID, flagSum, "sumLimit")
 			if err != nil {
-				code.AbortWithException(c, code.ServerError, err)
-				return
+				zap.L().Warn("问卷提交后更新总投票限制失败",
+					zap.Int64("survey_id", survey.ID),
+					zap.String("student_id", stuId),
+					zap.Error(err),
+				)
 			}
 		}
 		// 记录授权
 		if err = service.CreateOauthRecord(userInfo, time.Now(), data.ID); err != nil {
-			code.AbortWithException(c, code.ServerError, err)
-			return
+			zap.L().Warn("问卷提交后记录统一验证信息失败",
+				zap.Int64("survey_id", survey.ID),
+				zap.String("student_id", stuId),
+				zap.Error(err),
+			)
 		}
 	}
 	utils.JsonSuccessResponse(c, gin.H{
@@ -173,7 +195,8 @@ func SubmitSurvey(c *gin.Context) {
 }
 
 type getSurveyData struct {
-	ID int64 `form:"id" binding:"required"`
+	ID           int64 `form:"id" binding:"required"`
+	IsPreVisible bool  `form:"is_pre_visible"`
 }
 
 // GetSurvey 用户获取问卷
@@ -182,6 +205,14 @@ func GetSurvey(c *gin.Context) {
 	err := c.ShouldBindQuery(&data)
 	if err != nil {
 		code.AbortWithException(c, code.ParamError, err)
+		return
+	}
+	// 获取用户信息
+	user, err := service.GetUserSession(c)
+	// Treat an empty error message as "no session" (anonymous access), but
+	// still abort on any non-nil, non-empty error.
+	if err != nil && err.Error() != "" {
+		code.AbortWithException(c, code.ServerError, err)
 		return
 	}
 	// 获取问卷
@@ -196,11 +227,11 @@ func GetSurvey(c *gin.Context) {
 		return
 	}
 	// 判断问卷是否开放
-	if survey.Status != 2 {
+	if survey.Status != 2 && (user == nil || data.IsPreVisible == 0) {
 		code.AbortWithException(c, code.SurveyNotOpen, errors.New("问卷未开放"))
 		return
 	}
-	if survey.StartTime.IsZero() && survey.StartTime.After(time.Now()) {
+	if !survey.StartTime.IsZero() && survey.StartTime.After(time.Now()) {
 		code.AbortWithException(c, code.SurveyNotOpen, errors.New("问卷未开放"))
 		return
 	}
@@ -276,21 +307,26 @@ func GetSurvey(c *gin.Context) {
 	utils.JsonSuccessResponse(c, response)
 }
 
+type uploadImgData struct {
+	Img *multipart.FileHeader `form:"img" binding:"required"`
+}
+
 // UploadImg 上传图片
 func UploadImg(c *gin.Context) {
-	// 获取文件
-	fileHeader, err := c.FormFile("img")
-	if err != nil {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10*humanize.MiByte)
+
+	var data uploadImgData
+	if err := c.ShouldBind(&data); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			code.AbortWithException(c, code.FileSizeError, err)
+			return
+		}
 		code.AbortWithException(c, code.ParamError, err)
 		return
 	}
 
-	// 检查文件大小是否超出限制
-	if fileHeader.Size > 10*humanize.MiByte {
-		code.AbortWithException(c, code.FileSizeError, err)
-		return
-	}
-
+	fileHeader := data.Img
 	file, err := fileHeader.Open()
 	if err != nil {
 		code.AbortWithException(c, code.ServerError, err)
@@ -303,9 +339,10 @@ func UploadImg(c *gin.Context) {
 		}
 	}(file)
 
-	reader, err := service.ConvertToJPEG(file)
-	if errors.Is(err, image.ErrFormat) {
-		code.AbortWithException(c, code.PictureError, err)
+	resp, err := oss.Client.UploadFile(fileHeader.Filename, file, "img", true, true)
+	if errors.Is(err, cube.ErrRequestBizCodeNotOK) {
+		// 直接使用 Cube 的错误信息
+		code.AbortWithException(c, code.NewError(resp.Code, log.LevelError, resp.Msg), err)
 		return
 	}
 	if err != nil {
@@ -313,44 +350,54 @@ func UploadImg(c *gin.Context) {
 		return
 	}
 
-	// 保存图片
-	filename := uuid.New().String() + ".jpg"
-	dst := filepath.Join("./public/static/", filename)
-	err = service.SaveFile(reader, dst)
-	if err != nil {
-		code.AbortWithException(c, code.ServerError, err)
-		return
-	}
-
-	url := service.GetConfigUrl() + "/public/static/" + filename
+	url := oss.Client.GetFileURL(resp.Data.ObjectKey, false)
 	utils.JsonSuccessResponse(c, url)
+}
+
+type uploadFileData struct {
+	File *multipart.FileHeader `form:"file" binding:"required"`
 }
 
 // UploadFile 上传文件
 func UploadFile(c *gin.Context) {
-	// 获取文件
-	fileHeader, err := c.FormFile("file")
-	if err != nil {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 50*humanize.MiByte)
+
+	var data uploadFileData
+	if err := c.ShouldBind(&data); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			code.AbortWithException(c, code.FileSizeError, err)
+			return
+		}
 		code.AbortWithException(c, code.ParamError, err)
 		return
 	}
 
-	// 检查文件大小是否超出限制
-	if fileHeader.Size > 50*humanize.MiByte {
-		code.AbortWithException(c, code.FileSizeError, err)
+	fileHeader := data.File
+	file, err := fileHeader.Open()
+	if err != nil {
+		code.AbortWithException(c, code.ServerError, err)
 		return
 	}
+	defer func(file multipart.File) {
+		err := file.Close()
+		if err != nil {
+			zap.L().Error("Failed to close file", zap.Error(err))
+		}
+	}(file)
 
-	// 保存文件
-	filename := uuid.New().String() + filepath.Ext(fileHeader.Filename)
-	dst := filepath.Join("./public/file/", filename)
-	err = c.SaveUploadedFile(fileHeader, dst)
+	resp, err := oss.Client.UploadFile(fileHeader.Filename, file, "file", false, true)
+	if errors.Is(err, cube.ErrRequestBizCodeNotOK) {
+		// 直接使用 Cube 的错误信息
+		code.AbortWithException(c, code.NewError(resp.Code, log.LevelError, resp.Msg), err)
+		return
+	}
 	if err != nil {
 		code.AbortWithException(c, code.ServerError, err)
 		return
 	}
 
-	url := service.GetConfigUrl() + "/public/file/" + filename
+	url := oss.Client.GetFileURL(resp.Data.ObjectKey, false)
 	utils.JsonSuccessResponse(c, url)
 }
 

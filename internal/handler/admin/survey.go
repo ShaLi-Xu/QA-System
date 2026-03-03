@@ -416,8 +416,8 @@ type getSurveyAnswersData struct {
 	ID       int64  `form:"id" binding:"required"`
 	Text     string `form:"text"`
 	Unique   bool   `form:"unique"`
-	PageNum  int    `form:"page_num" binding:"required"`
-	PageSize int    `form:"page_size" binding:"required"`
+	PageNum  int    `form:"page_num" binding:"required,gt=0"`
+	PageSize int    `form:"page_size" binding:"required,gt=0"`
 }
 
 // GetSurveyAnswers 获取问卷收集数据
@@ -469,8 +469,8 @@ func GetSurveyAnswers(c *gin.Context) {
 }
 
 type getAllSurveyData struct {
-	PageNum  int    `form:"page_num" binding:"required"`
-	PageSize int    `form:"page_size" binding:"required"`
+	PageNum  int    `form:"page_num" binding:"required,gt=0"`
+	PageSize int    `form:"page_size" binding:"required,gt=0"`
 	Title    string `form:"title"`
 }
 
@@ -672,8 +672,8 @@ func DownloadFile(c *gin.Context) {
 
 type getSurveyStatisticsData struct {
 	ID       int64 `form:"id" binding:"required"`
-	PageNum  int   `form:"page_num" binding:"required"`
-	PageSize int   `form:"page_size" binding:"required"`
+	PageNum  int   `form:"page_num" binding:"required,gt=0"`
+	PageSize int   `form:"page_size" binding:"required,gt=0"`
 }
 
 // GetSurveyStatistics 获取统计问卷选择题数据
@@ -830,6 +830,7 @@ func DeleteAnswerSheet(c *gin.Context) {
 	objectID, err := primitive.ObjectIDFromHex(data.AnswerID)
 	if err != nil {
 		code.AbortWithException(c, code.ServerError, err)
+		return
 	}
 	// 获取问卷
 	err = service.GetAnswerSheetByAnswerID(objectID)

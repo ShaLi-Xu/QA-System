@@ -1,10 +1,7 @@
 package service
 
 import (
-	"bytes"
-	"image"
 	_ "image/gif" // 注册解码器
-	"image/jpeg"
 	_ "image/png" // 注册解码器
 	"io"
 	"os"
@@ -24,6 +21,30 @@ import (
 	_ "golang.org/x/image/tiff"
 	_ "golang.org/x/image/webp"
 )
+
+var uniqueAnswerSheetLocks sync.Map
+
+func getUniqueAnswerSheetLock(sid int64) *sync.Mutex {
+	if v, ok := uniqueAnswerSheetLocks.Load(sid); ok {
+		if mu, ok := v.(*sync.Mutex); ok {
+			return mu
+		}
+	}
+	mu := &sync.Mutex{}
+	actual, _ := uniqueAnswerSheetLocks.LoadOrStore(sid, mu)
+	return actual.(*sync.Mutex)
+}
+
+func saveAnswerSheetWithUniqueLock(sid int64, answerSheet dao.AnswerSheet, qids []int) error {
+	if len(qids) == 0 {
+		return d.SaveAnswerSheet(ctx, answerSheet, qids)
+	}
+	// 唯一题判重依赖“查询+更新+插入”组合操作，进程内按问卷串行化可避免并发窗口。
+	mu := getUniqueAnswerSheetLock(sid)
+	mu.Lock()
+	defer mu.Unlock()
+	return d.SaveAnswerSheet(ctx, answerSheet, qids)
+}
 
 // GetSurveyByID 根据ID获取问卷
 func GetSurveyByID(id int64) (*model.Survey, error) {
@@ -74,16 +95,26 @@ func SubmitSurvey(sid int64, data []dao.QuestionsList, t string, stuId string) e
 		answer.Content = q.Answer
 		answerSheet.Answers = append(answerSheet.Answers, answer)
 	}
-	err := d.SaveAnswerSheet(ctx, answerSheet, qids)
+	err := saveAnswerSheetWithUniqueLock(sid, answerSheet, qids)
 	if err != nil {
 		return err
 	}
 	err = d.IncreaseSurveyNum(ctx, sid)
 	if err != nil {
+		if rollbackErr := d.DeleteAnswerSheetByAnswerID(ctx, answerSheet.AnswerID); rollbackErr != nil {
+			zap.L().Error("问卷计数更新失败后回滚答卷失败",
+				zap.Int64("survey_id", sid),
+				zap.String("answer_id", answerSheet.AnswerID.Hex()),
+				zap.Error(rollbackErr),
+			)
+		}
 		return err
 	}
-	err = FromSurveyIDToMsg(sid)
-	return err
+	// 通知失败不影响主提交流程，避免客户端因重试造成重复提交。
+	if err := FromSurveyIDToMsg(sid); err != nil {
+		zap.L().Warn("问卷提交后发送通知失败", zap.Int64("survey_id", sid), zap.Error(err))
+	}
+	return nil
 }
 
 // CreateOauthRecord 创建一条统一验证记录
@@ -98,46 +129,6 @@ func CreateOauthRecord(userInfo oauth.UserInfo, t time.Time, sid int64) error {
 		Time:         t,
 	}
 	return d.SaveRecordSheet(ctx, sheet, sid)
-}
-
-// ConvertToJPEG 将图片转换为 JPEG 格式
-func ConvertToJPEG(reader io.Reader) (io.Reader, error) {
-	img, _, err := image.Decode(reader)
-	if err != nil {
-		return nil, err
-	}
-
-	var buf bytes.Buffer
-	err = jpeg.Encode(&buf, img, &jpeg.Options{Quality: 100})
-	if err != nil {
-		return nil, err
-	}
-	return bytes.NewReader(buf.Bytes()), nil
-}
-
-// SaveFile 保存文件
-func SaveFile(reader io.Reader, path string) error {
-	dst := filepath.Clean(path)
-	err := os.MkdirAll(filepath.Dir(dst), 0750)
-	if err != nil {
-		return err
-	}
-
-	// 创建文件
-	outFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer func(outFile *os.File) {
-		err := outFile.Close()
-		if err != nil {
-			zap.L().Error("Failed to close file", zap.Error(err))
-		}
-	}(outFile)
-
-	// 写入文件
-	_, err = io.Copy(outFile, reader)
-	return err
 }
 
 // UpdateVoteLimit 更新投票限制

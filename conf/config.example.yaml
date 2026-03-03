@@ -39,6 +39,11 @@ mongodb:
 url:
   host: "https://example.com"  # 项目地址
 
+cube:
+  baseUrl:
+  bucketName:
+  apiKey:
+
 key: 
 
 user:

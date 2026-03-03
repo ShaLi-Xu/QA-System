@@ -1,13 +1,13 @@
 package main
 
 import (
-	"QA-System/internal/pkg/idgen"
 	"time"
 
 	global "QA-System/internal/global/config"
 	"QA-System/internal/middleware"
 	"QA-System/internal/pkg/database/mongodb"
 	"QA-System/internal/pkg/database/mysql"
+	"QA-System/internal/pkg/idgen"
 	"QA-System/internal/pkg/log"
 	"QA-System/internal/pkg/session"
 	"QA-System/internal/pkg/utils"
